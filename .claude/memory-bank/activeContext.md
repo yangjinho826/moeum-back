@@ -6,6 +6,17 @@
 
 ## Status
 
+**🚀 거래 탭 통장 필터 배포 완료 (2026-09-20). back `v0.13.0` → front `v0.15.0` 순서.**
+거래 탭 좌우(목록 vs 요약·달력·지출Top5) 숫자가 어긋나던 문제. 집계 3개(`sum_by_type_for_month`·
+`sum_by_category_for_month`·`daily_sums_for_month`)와 `/stats/monthly`·`/transaction/calendar/{y}/{m}/full`
+에 `account_id` 옵션 추가. 조건은 `_account_involved` = `or_(account_id, to_account_id)`.
+기본값 None 이라 홈(`home/service.py:46`)은 무영향 — 회귀 테스트 D6_4 로 고정.
+백엔드를 먼저 올린 이유 = 프론트가 `accountId` 를 보내는데 구 백엔드는 모르는 쿼리 파라미터를
+무시할 뿐이라 에러는 안 나지만 필터가 안 먹는다(반대 순서면 그 틈이 생김).
+**곁다리로 선결 버그 1건 수정**: `update_transaction` 에 `_normalize_category` 가 없어 EXPENSE→TRANSFER
+전환 시 category_id 가 살아남았고, 새 `or_` 조건 탓에 두 통장 양쪽에 이중계상됐다(재현 테스트 D6_6).
+테스트 `tests/domain/test_stats_account_filter.py` 6개 추가 → 전체 99 passed.
+
 **🚀 Stage 1~3 운영 배포 완료 (2026-08-17). USD(Stage 4)는 보류 — 사용자가 "계좌 외화"를 원한 것으로 드러남.**
 
 **배포 순서와 태그** — back `v0.12.0` → front `v0.12.0` → front `v0.12.1`(장애 복구) → front `v0.12.2`(필터).
