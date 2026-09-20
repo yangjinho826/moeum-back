@@ -109,10 +109,16 @@ async def get_calendar_full(
     household: CurrentHousehold,
     year: int = Path(..., ge=2000, le=2100),
     month: int = Path(..., ge=1, le=12),
+    account_id: UUID | None = Query(None, alias="accountId"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[CalendarFullResponse]:
-    """달력 페이지 1호출 — calendar + stats(카테고리) + 그달 거래 전부"""
-    response = await service.get_calendar_full(db, household, year, month)
+    """달력 페이지 1호출 — calendar + stats(카테고리) + 그달 거래 전부.
+
+    accountId 를 주면 셋 다 그 통장이 낀 거래만(거래 탭 통장 필터).
+    """
+    response = await service.get_calendar_full(
+        db, household, year, month, account_id,
+    )
     return ApiResponse.ok(data=response)
 
 

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,8 +17,14 @@ async def get_monthly_stats(
     household: CurrentHousehold,
     year: int = Query(..., ge=2000, le=2100),
     month: int = Query(..., ge=1, le=12),
+    account_id: UUID | None = Query(None, alias="accountId"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[MonthlyStatsResponse]:
-    """월간 카테고리별 지출/수입 집계 — 이번 달 지출 카드/차트용"""
-    response = await service.get_monthly_stats(db, household, year, month)
+    """월간 카테고리별 지출/수입 집계 — 이번 달 지출 카드/차트용.
+
+    accountId 를 주면 그 통장이 낀 거래만 집계(거래 탭 통장 필터).
+    """
+    response = await service.get_monthly_stats(
+        db, household, year, month, account_id,
+    )
     return ApiResponse.ok(data=response)

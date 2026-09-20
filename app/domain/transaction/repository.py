@@ -13,6 +13,14 @@ from app.domain.transaction.enum import TxType, ValuationDirection
 from app.domain.transaction.model import Transaction
 
 
+def _account_involved(account_id: UUID):
+    """그 통장이 낀 거래 — 출금처 또는 입금처(이체 상대). _build_conditions 와 동일 규칙."""
+    return or_(
+        Transaction.account_id == account_id,
+        Transaction.to_account_id == account_id,
+    )
+
+
 class TransactionFilter:
     def __init__(
         self,
@@ -59,12 +67,7 @@ class TransactionRepository:
         if f.tx_type is not None:
             conds.append(Transaction.tx_type == f.tx_type)
         if f.account_id is not None:
-            conds.append(
-                or_(
-                    Transaction.account_id == f.account_id,
-                    Transaction.to_account_id == f.account_id,
-                )
-            )
+            conds.append(_account_involved(f.account_id))
         if f.category_id is not None:
             conds.append(Transaction.category_id == f.category_id)
         if f.from_date is not None:
@@ -342,22 +345,24 @@ class TransactionRepository:
 
     async def sum_by_category_for_month(
         self, household_id: UUID, year: int, month: int,
+        account_id: UUID | None = None,
     ) -> list[tuple[UUID, Decimal]]:
         """category_id 별 EXPENSE/INCOME 합계 (TRANSFER 는 category_id 없음)"""
+        conds = [
+            Transaction.household_id == household_id,
+            func.extract("year", Transaction.tx_date) == year,
+            func.extract("month", Transaction.tx_date) == month,
+            Transaction.category_id.is_not(None),
+            Transaction.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        if account_id is not None:
+            conds.append(_account_involved(account_id))
         stmt = (
             select(
                 Transaction.category_id,
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
-            .where(
-                and_(
-                    Transaction.household_id == household_id,
-                    func.extract("year", Transaction.tx_date) == year,
-                    func.extract("month", Transaction.tx_date) == month,
-                    Transaction.category_id.is_not(None),
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                )
-            )
+            .where(and_(*conds))
             .group_by(Transaction.category_id)
         )
         result = await self.db.execute(stmt)
@@ -394,21 +399,23 @@ class TransactionRepository:
 
     async def sum_by_type_for_month(
         self, household_id: UUID, year: int, month: int,
+        account_id: UUID | None = None,
     ) -> dict[str, Decimal]:
         """tx_type 별 월 합계 (income/expense/transfer)"""
+        conds = [
+            Transaction.household_id == household_id,
+            func.extract("year", Transaction.tx_date) == year,
+            func.extract("month", Transaction.tx_date) == month,
+            Transaction.data_stat_cd == DataStatus.ACTIVE,
+        ]
+        if account_id is not None:
+            conds.append(_account_involved(account_id))
         stmt = (
             select(
                 Transaction.tx_type,
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
-            .where(
-                and_(
-                    Transaction.household_id == household_id,
-                    func.extract("year", Transaction.tx_date) == year,
-                    func.extract("month", Transaction.tx_date) == month,
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                )
-            )
+            .where(and_(*conds))
             .group_by(Transaction.tx_type)
         )
         result = await self.db.execute(stmt)
@@ -432,10 +439,21 @@ class TransactionRepository:
 
     async def daily_sums_for_month(
         self, household_id: UUID, year: int, month: int,
+        account_id: UUID | None = None,
     ) -> list[tuple[date, str, Decimal, int]]:
         """일별 (tx_date, tx_type) 별 SUM(amount) + COUNT — 달력 뷰용"""
         first_day = date(year, month, 1)
         last_day = date(year, month, monthrange(year, month)[1])
+        conds = [
+            Transaction.household_id == household_id,
+            Transaction.data_stat_cd == DataStatus.ACTIVE,
+            Transaction.tx_date >= first_day,
+            Transaction.tx_date <= last_day,
+            # 평가조정은 수입/지출/이체가 아니라 달력 일별 집계·카운트에서 제외.
+            Transaction.tx_type != TxType.VALUATION,
+        ]
+        if account_id is not None:
+            conds.append(_account_involved(account_id))
         result = await self.db.execute(
             select(
                 Transaction.tx_date,
@@ -443,16 +461,7 @@ class TransactionRepository:
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
                 func.count(Transaction.id).label("cnt"),
             )
-            .where(
-                and_(
-                    Transaction.household_id == household_id,
-                    Transaction.data_stat_cd == DataStatus.ACTIVE,
-                    Transaction.tx_date >= first_day,
-                    Transaction.tx_date <= last_day,
-                    # 평가조정은 수입/지출/이체가 아니라 달력 일별 집계·카운트에서 제외.
-                    Transaction.tx_type != TxType.VALUATION,
-                )
-            )
+            .where(and_(*conds))
             .group_by(Transaction.tx_date, Transaction.tx_type)
             .order_by(Transaction.tx_date.asc())
         )

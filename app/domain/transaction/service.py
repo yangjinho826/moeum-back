@@ -190,6 +190,7 @@ async def update_transaction(
     await _validate_update_fks(db, household, tx, req)
     _apply_partial_update(tx, req)
     _normalize_to_account(tx)
+    _normalize_category(tx)
     _validate_transfer_consistency(tx)
 
     await db.flush()
@@ -222,15 +223,22 @@ async def get_transaction_detail(
 
 async def get_calendar_full(
     db: AsyncSession, household: Household, year: int, month: int,
+    account_id: UUID | None = None,
 ) -> CalendarFullResponse:
-    """달력 페이지 1호출 — calendar(일별 합계) + stats(카테고리별) + 그달 거래 전부."""
+    """달력 페이지 1호출 — calendar(일별 합계) + stats(카테고리별) + 그달 거래 전부.
+
+    account_id 를 주면 세 묶음 모두 그 통장이 낀 거래만. 거래 탭에서 좌(목록)·우(요약·
+    달력·Top5)가 같은 응답을 보도록 하는 게 목적이라 셋이 같은 필터를 타야 한다.
+    """
     # 순환 import 방지 — 함수 안에서 import
     from app.domain.stats import service as stats_service
 
-    calendar = await get_calendar(db, household, year, month)
-    stats = await stats_service.get_monthly_stats(db, household, year, month)
+    calendar = await get_calendar(db, household, year, month, account_id)
+    stats = await stats_service.get_monthly_stats(
+        db, household, year, month, account_id,
+    )
 
-    f = TransactionFilter(year=year, month=month)
+    f = TransactionFilter(year=year, month=month, account_id=account_id)
     # 한 달치 거래 — 가계부 평균 100 미만이라 cursor 페이징 불필요, 큰 limit 로 통째.
     tx_page = await list_transactions(db, household, f, cursor=None, limit=500)
 
@@ -270,10 +278,11 @@ async def get_form_options(
 
 async def get_calendar(
     db: AsyncSession, household: Household, year: int, month: int,
+    account_id: UUID | None = None,
 ) -> CalendarResponse:
     """달력 뷰 — 일별 income/expense/transfer 합계 + 월간 합계"""
     repo = TransactionRepository(db)
-    rows = await repo.daily_sums_for_month(household.id, year, month)
+    rows = await repo.daily_sums_for_month(household.id, year, month, account_id)
 
     by_date: dict[date, dict] = {}
     monthly_income = Decimal("0.00")
@@ -576,6 +585,15 @@ def _normalize_to_account(tx: Transaction) -> None:
     to_account_id 를 제거해야 상대 계좌 원장에 가짜 거래가 잡히지 않는다."""
     if tx.tx_type != TxType.TRANSFER:
         tx.to_account_id = None
+
+
+def _normalize_category(tx: Transaction) -> None:
+    """TRANSFER 엔 카테고리가 없다(생성은 schema 가 막지만 타입 전환은 여기서).
+
+    남아 있으면 카테고리 집계가 출금·입금 통장 양쪽에서 같은 금액을 더해
+    "통장별 합 > 가계부 전체" 가 된다 — _normalize_to_account 와 같은 이유다."""
+    if tx.tx_type == TxType.TRANSFER:
+        tx.category_id = None
 
 
 def _validate_transfer_consistency(tx: Transaction) -> None:
