@@ -200,10 +200,10 @@ class PortfolioItemRepository:
     async def find_active_other_prices(
         self, household_id: UUID | None = None,
     ) -> list[dict]:
-        """OTHER 시장(금 등) 활성 종목의 (code, current_price) — 시세이력 박제용.
+        """OTHER 시장(금 등) 활성 종목의 (item_id, current_price) — 시세이력 박제용.
 
         야후 미지원이라 backfill 불가 → 박제 시점 수동가를 그 달 시세로 남기는 데 쓴다.
-        같은 code 가 여러 종목이면 각각 반환(호출부 upsert 라 마지막이 이김 — 보통 유일).
+        수동가는 가계부·종목마다 달라 code 가 아니라 종목 id 로 돌려준다(code 는 비어 있기도 함).
         household_id 주면 그 가계부만, 없으면 전체(시장 공통 수집).
         """
         conds = [
@@ -214,10 +214,10 @@ class PortfolioItemRepository:
         if household_id is not None:
             conds.append(PortfolioItem.household_id == household_id)
         result = await self.db.execute(
-            select(PortfolioItem.code, PortfolioItem.current_price).where(and_(*conds))
+            select(PortfolioItem.id, PortfolioItem.current_price).where(and_(*conds))
         )
         return [
-            {"code": code, "current_price": price} for code, price in result.all()
+            {"item_id": item_id, "current_price": price} for item_id, price in result.all()
         ]
 
     async def bulk_update_current_price_by_code_market(

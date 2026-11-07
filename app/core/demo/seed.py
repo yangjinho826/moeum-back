@@ -37,6 +37,7 @@ from app.domain.fixed.model import FixedExpense
 from app.domain.household.enum import HouseholdRole
 from app.domain.household.model import Household, HouseholdMember
 from app.domain.market_price import service as market_price_service
+from app.domain.market_price.model import MarketPriceHistory
 from app.domain.portfolio.enum import Market, PortfolioTxType
 from app.domain.portfolio.model import (
     PortfolioItem,
@@ -184,7 +185,8 @@ async def _purge_demo_data(session: AsyncSession, user_id) -> None:
 
     "가계부 1개"가 아니라 "owner 인 전부"가 기준 — 체험자가 POST /household 로
     새 가계부를 만들 수 있어서 그것까지 회수해야 다음 체험자가 같은 화면을 본다.
-    market_price_history 는 시장 공통 자산이라 건드리지 않는다.
+    market_price_history 의 야후 시세는 시장 공통이라 두고, OTHER(수동가)는 종목 id 가 키라
+    지우는 데모 종목 것만 같이 지운다 — 리셋마다 새 종목 id 행이 쌓이지 않게.
     """
     household_ids = list(
         (
@@ -206,6 +208,24 @@ async def _purge_demo_data(session: AsyncSession, user_id) -> None:
     if account_ids:
         await session.execute(
             delete(AccountSnapshot).where(AccountSnapshot.account_id.in_(account_ids)),
+        )
+
+    other_item_ids = (
+        await session.scalars(
+            select(PortfolioItem.id).where(
+                PortfolioItem.household_id.in_(household_ids),
+                PortfolioItem.market == Market.OTHER.value,
+            ),
+        )
+    ).all()
+    if other_item_ids:
+        await session.execute(
+            delete(MarketPriceHistory).where(
+                MarketPriceHistory.market == Market.OTHER.value,
+                MarketPriceHistory.code.in_(
+                    [market_price_service.other_price_code(i) for i in other_item_ids]
+                ),
+            ),
         )
 
     # transactions 가 fixed_expenses 를 FK 로 물고 있어(ondelete=SET NULL) 먼저 지운다

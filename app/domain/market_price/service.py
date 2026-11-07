@@ -214,6 +214,11 @@ async def backfill_yahoo_monthly(
     return upserted
 
 
+def other_price_code(item_id: UUID) -> str:
+    """OTHER 종목 시세 이력의 code 값 — 종목 id. 저장(snapshot)·조회(value) 가 같은 규칙을 쓰게 한 곳에."""
+    return str(item_id)
+
+
 async def snapshot_other_prices(
     session: AsyncSession, month: date, household_id: UUID | None = None,
 ) -> int:
@@ -227,7 +232,8 @@ async def snapshot_other_prices(
         return 0
     rows = [
         {
-            "code": o["code"],
+            # 종목 단위 키 — code("" 허용)로 묶으면 한 INSERT 안 키 중복으로 잡 전체가 롤백된다
+            "code": other_price_code(o["item_id"]),
             "market": Market.OTHER.value,
             "price_date": month,
             "price": o["current_price"],
@@ -256,15 +262,21 @@ async def value_holdings_at_month(
 
     def _key(h: dict) -> tuple[str, str]:
         it = item_map.get(h["item_id"])
-        return (it.code, it.market) if it else (h["code"], h["market"])
+        code, market = (it.code, it.market) if it else (h["code"], h["market"])
+        # OTHER 는 종목 단위 키만 — 옛 (code, OTHER) 행은 가계부끼리 공유돼 남의 수동가일 수 있다.
+        # 과거 달 기록값은 backfill 리비전(c2e4a6b8d0f1)이 이 키로 옮겨 두었다.
+        if market == Market.OTHER.value:
+            return (other_price_code(h["item_id"]), market)
+        return (code, market)
 
+    keys = {h["item_id"]: _key(h) for h in holdings}
     prices = await MarketPriceHistoryRepository(session).find_prices_for_month(
-        list({_key(h) for h in holdings}), month,
+        list(set(keys.values())), month,
     )
 
     valued: dict = {}
     for h in holdings:
-        px = prices.get(_key(h))
+        px = prices.get(keys[h["item_id"]])
         if px is not None:
             valued[h["item_id"]] = {
                 "current_price": px, "valuation": h["quantity"] * px,
