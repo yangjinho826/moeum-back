@@ -41,6 +41,10 @@ class ErrorCode(Enum):
 
     # 통장 (AC)
     ACCOUNT_HAS_DEPENDENTS = (400, "AC001", "보유 종목이 있는 통장은 삭제할 수 없습니다. 먼저 전량 매도하세요.")
+    ACCOUNT_TYPE_LOCKED = (400, "AC002", "거래나 종목이 있는 통장은 투자·자산·일반 사이로 종류를 바꿀 수 없습니다.")
+
+    # 카테고리 (CT)
+    CATEGORY_IN_USE = (400, "CT001", "거래가 있는 카테고리는 수입/지출 구분을 바꿀 수 없습니다.")
 
     # 멱등성 (ID)
     IDEMPOTENCY_KEY_CONFLICT = (422, "ID001", "다른 요청에 사용된 키입니다.")

@@ -362,8 +362,9 @@ async def get_realized_pnl_by_item(
 
     증권사 '매매손익' 화면과 동일 구성. 기간 미지정 시 최근 12개월.
     구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
+    전량 매도로 DELETED 된 종목도 매도 이력은 남으니 상태 무관 조회.
     """
-    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    item = await PortfolioItemRepository(db).find_by_id_any_status(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -617,8 +618,8 @@ async def list_item_transactions_cursor(
     limit: int,
 ) -> PortfolioTxPage:
     """종목 단건 거래 내역 — 무한 스크롤. transaction 패턴 그대로."""
-    # 종목 소유권 검증
-    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    # 종목 소유권 검증 — 전량 매도로 DELETED 된 종목도 거래 내역은 남아 상태 무관 조회
+    item = await PortfolioItemRepository(db).find_by_id_any_status(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 

@@ -129,18 +129,46 @@ class TransactionRepository:
         )
         return result.scalar() or 0
 
+    async def has_active_for_account(self, account_id: UUID) -> bool:
+        """이 통장이 낀(출금·입금) 활성 거래가 하나라도 있나 — 통장 타입 변경 가드용."""
+        result = await self.db.execute(
+            select(Transaction.id)
+            .where(and_(_account_involved(account_id), Transaction.data_stat_cd == DataStatus.ACTIVE))
+            .limit(1)
+        )
+        return result.first() is not None
+
+    async def has_active_for_category(self, category_id: UUID) -> bool:
+        """이 카테고리를 쓰는 활성 수입·지출 거래가 있나 — 카테고리 kind 변경 가드용.
+
+        이체·평가조정은 카테고리 집계에 안 잡히고, 정규화 이전 행이 카테고리를 들고 있어도
+        사용자가 찾을 수 없어 kind 를 영영 못 바꾸게 되므로 세지 않는다."""
+        result = await self.db.execute(
+            select(Transaction.id)
+            .where(
+                and_(
+                    Transaction.category_id == category_id,
+                    Transaction.tx_type.in_(
+                        [TxType.INCOME, TxType.EXPENSE, TxType.FIXED_EXPENSE]
+                    ),
+                    Transaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
     async def soft_delete_solo_by_account_id(self, account_id: UUID) -> int:
-        """이 통장의 단독거래(수입/지출/고정비, 이체 아님) soft-delete — 통장 cascade용.
-        이체는 상대 통장과 공유라 여기서 제외(to_account_id IS NULL 로 단독만)."""
+        """이 통장의 단독거래(수입/지출/고정비/평가조정, 이체 아님) soft-delete — 통장 cascade용.
+        이체는 상대 통장과 공유라 여기서 제외(to_account_id IS NULL 로 단독만).
+        평가조정도 그 통장에만 걸린 단독 거래라 남기면 지운 통장의 거래가 목록에 남는다."""
         stmt = (
             update(Transaction)
             .where(
                 and_(
                     Transaction.account_id == account_id,
+                    # 도착 통장이 없으면 단독 거래 — 타입 목록을 두면 새 타입이 생길 때 같은 누락이 반복된다
                     Transaction.to_account_id.is_(None),
-                    Transaction.tx_type.in_(
-                        [TxType.INCOME, TxType.EXPENSE, TxType.FIXED_EXPENSE]
-                    ),
                     Transaction.data_stat_cd == DataStatus.ACTIVE,
                 )
             )

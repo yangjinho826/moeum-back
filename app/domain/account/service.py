@@ -166,7 +166,8 @@ async def update_account(
 
     if req.name is not None:
         account.name = req.name.strip()
-    if req.account_type is not None:
+    if req.account_type is not None and req.account_type != account.account_type:
+        await _guard_account_type_change(db, account, req.account_type)
         account.account_type = req.account_type
     if req.start_balance is not None:
         account.start_balance = req.start_balance
@@ -183,6 +184,33 @@ async def update_account(
     tx_repo = TransactionRepository(db)
     summary = await _calc_balance(tx_repo, account, db)
     return _build_response(account, summary)
+
+
+def _type_group(account_type: str) -> str:
+    """잔액 공식이 같은 묶음 — 투자(현금+평가) / 수동자산(이체·평가조정만) / 일반(현금흐름)."""
+    if account_type == AccountType.INVESTMENT:
+        return "investment"
+    if account_type in MANUAL_ASSET_ACCOUNT_TYPES:
+        return "manual"
+    return "cash"
+
+
+async def _guard_account_type_change(
+    db: AsyncSession, account: Account, new_type: AccountType,
+) -> None:
+    """묶음이 바뀌는 타입 변경은 이력이 없을 때만.
+
+    투자↔일반이면 잔액에서 종목 평가액이 빠지거나 붙고(배분에는 남음), 일반→수동자산이면
+    허용되지 않는 지출·수입이 남는다. 같은 묶음 안(부동산→연금)은 공식이 같아 허용.
+    """
+    if _type_group(account.account_type) == _type_group(new_type):
+        return
+    if (
+        await TransactionRepository(db).has_active_for_account(account.id)
+        or await PortfolioItemRepository(db).count_active_by_account_id(account.id) > 0
+        or await PortfolioTransactionRepository(db).has_active_for_account(account.id)
+    ):
+        raise CustomException(ErrorCode.ACCOUNT_TYPE_LOCKED)
 
 
 async def delete_account(

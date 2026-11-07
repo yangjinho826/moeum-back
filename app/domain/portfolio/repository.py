@@ -248,6 +248,20 @@ class PortfolioTransactionRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    async def has_active_for_account(self, account_id: UUID) -> bool:
+        """이 통장에 활성 매매내역이 있나 — 통장 타입 변경 가드용(전량매도 종목의 이력 포함)."""
+        result = await self.db.execute(
+            select(PortfolioTransaction.id)
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
     async def find_by_id(self, tx_id: UUID) -> PortfolioTransaction | None:
         result = await self.db.execute(
             select(PortfolioTransaction).where(
