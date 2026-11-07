@@ -1,5 +1,14 @@
 # 결정 기록
 
+## 2026-11-07 — 박제는 가계부 advisory lock + 활성 부분 unique, 매매는 종목 FOR UPDATE 를 첫 쓰기보다 먼저
+- 결정: 수동 박제(시세 upsert 뒤)·월 잡(가계부 루프 맨 위)이 pg_advisory_xact_lock(1001, hashtext(household)) 대기. account_snapshots·PVH 활성 (owner, 월) 부분 unique(중복 정리 리비전 분리).
+- 매매: buy·sell·종목 수정/삭제·거래 수정/삭제가 종목 SELECT FOR UPDATE 를 먼저, 거래 수정/삭제는 lock 뒤 tx refresh(삭제됐으면 404). 데모 purge 는 종목→매매거래 순, 시세 upsert 는 정렬 — lock 순서 통일.
+- 왜: 더블클릭·잡 겹침에 통장마다 2벌 박제(yearly 2배), 동시 매도가 둘 다 보유 검사 통과(초과 매도), 거래 수정↔과거 매수가 데드락(테스트로 재현).
+- 버린 옵션: unique 만(동시 요청 500) / try-lock(두 번째 실패 응답) / SERIALIZABLE(전 요청 재시도 필요).
+- 외부 검토 미실시: Codex 모델 설정 400 → Claude 새 컨텍스트 반박(Blocker 2 반영)·리뷰 2회·최종 리뷰(테스트 barrier 2건 수정, 변이로 RED 확인).
+- 마이그레이션: d3f5b7c9e1a2(dedupe)·e4a6c8d0f2b3(unique) 테스트 DB 왕복만. 운영 적용 전 중복 건수 확인·월 1일 잡 시간대 피하기(CREATE INDEX SHARE lock).
+- 상세: .claude/plans/done/w6-snapshot-unique-trade-lock.md · tests/domain/test_concurrency_w6.py
+
 ## 2026-11-07 — 거래 수정은 바뀐 값만 검증, 타입 전환 규칙을 생성과 맞춤 · 카테고리 kind·통장 타입 그룹 변경 차단
 - 결정: 수정 PUT 은 새로 고른 FK 만 소속·ACTIVE 검증(유형이 바뀌면 출발 통장 포함), 남은 값은 유형 규칙·kind 만. 명시된 null 은 해제. 전환 시 방향·카테고리·고정지출 정리, 필수값은 관련 칸이 바뀔 때만.
 - 차단: 활성 수입·지출 거래나 고정지출이 쓰는 카테고리의 kind 변경(CT001) · 거래·종목·매매내역 있는 통장의 투자/수동자산/일반 그룹 변경(AC002). 통장 삭제 cascade 는 to_account 없는 단독 거래 전부.
