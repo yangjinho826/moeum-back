@@ -15,6 +15,11 @@ class AccountSnapshot(BaseEntity):
     __table_args__ = (
         Index("idx_snapshots_account_date", "account_id", text("snapshot_date DESC")),
         Index("idx_snapshots_date", text("snapshot_date DESC")),
+        # 활성 (통장, 월) 당 1개 — 가계부 lock 을 우회한 중복 박제의 안전망(yearly 합계 2배 방지)
+        Index(
+            "uq_snapshots_account_date_active", "account_id", "snapshot_date",
+            unique=True, postgresql_where=text("data_stat_cd = '50'"),
+        ),
     )
 
     account_id: Mapped[uuid.UUID] = mapped_column(nullable=False)

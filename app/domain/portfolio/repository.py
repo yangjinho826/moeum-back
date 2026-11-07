@@ -42,6 +42,22 @@ class PortfolioItemRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id_for_update(
+        self, item_id: UUID, *, any_status: bool = False,
+    ) -> PortfolioItem | None:
+        """매매 경로의 직렬화 지점 — SELECT … FOR UPDATE.
+
+        같은 종목 요청은 여기서 줄을 서고, 뒤 요청은 앞 요청이 커밋한 수량·상태를 본다.
+        populate_existing: 세션에 먼저 읽힌 옛 값이 있어도 잠근 시점 값으로 덮는다.
+        autoflush 를 끈 채(no_autoflush) 종목을 고치고 부르면 그 변경이 덮이니, 호출은 첫 쓰기 전에."""
+        stmt = select(PortfolioItem).where(PortfolioItem.id == item_id)
+        if not any_status:
+            stmt = stmt.where(PortfolioItem.data_stat_cd == DataStatus.ACTIVE)
+        result = await self.db.execute(
+            stmt.with_for_update().execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def find_by_id_any_status(self, item_id: UUID) -> PortfolioItem | None:
         """삭제 상태 무관 조회 — 전량매도로 죽은 종목의 거래 수정/삭제 재계산용."""
         result = await self.db.execute(

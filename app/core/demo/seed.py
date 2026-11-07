@@ -228,12 +228,13 @@ async def _purge_demo_data(session: AsyncSession, user_id) -> None:
             ),
         )
 
-    # transactions 가 fixed_expenses 를 FK 로 물고 있어(ondelete=SET NULL) 먼저 지운다
+    # transactions 가 fixed_expenses 를 FK 로 물고 있어(ondelete=SET NULL) 먼저 지운다.
+    # 종목은 매매 거래보다 먼저 — 매매 경로가 "종목 lock → 거래 행" 순서라 반대로 잡으면 데드락
     for model in (
         Transaction,
         PortfolioValueHistory,
-        PortfolioTransaction,
         PortfolioItem,
+        PortfolioTransaction,
         FixedExpense,
         Category,
         Account,
