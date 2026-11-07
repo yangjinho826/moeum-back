@@ -1,5 +1,13 @@
 # 결정 기록
 
+## 2026-11-07 — 거래 수정은 바뀐 값만 검증, 타입 전환 규칙을 생성과 맞춤 · 카테고리 kind·통장 타입 그룹 변경 차단
+- 결정: 수정 PUT 은 새로 고른 FK 만 소속·ACTIVE 검증(유형이 바뀌면 출발 통장 포함), 남은 값은 유형 규칙·kind 만. 명시된 null 은 해제. 전환 시 방향·카테고리·고정지출 정리, 필수값은 관련 칸이 바뀔 때만.
+- 차단: 활성 수입·지출 거래나 고정지출이 쓰는 카테고리의 kind 변경(CT001) · 거래·종목·매매내역 있는 통장의 투자/수동자산/일반 그룹 변경(AC002). 통장 삭제 cascade 는 to_account 없는 단독 거래 전부.
+- 왜: 삭제된 고정지출·카테고리가 걸린 거래는 메모도 못 고쳤고, 전환 뒤 남은 값이 월 합계·카테고리 차트·잔액을 어긋나게 했다.
+- 버린 옵션: 수정 API PATCH 재설계(프론트 계약) / 삭제된 FK 자동 해제(모르게 데이터 변경) / 통장 타입 변경 전면 금지.
+- 외부 검토 미실시: Codex 모델 설정 400 → Claude 새 컨텍스트 리뷰(9건 중 5 수정 · 1 W7 이관 · 2 주차장 · 1 리팩터) + 최종 리뷰(1건 수정).
+- 상세: .claude/plans/done/w5-tx-account-integrity.md · tests/domain/test_integrity_w5.py
+
 ## 2026-11-07 — DB commit 을 응답 전에(DbDepends = scope="function")
 - 결정: get_db 의존성을 전부 Depends(get_db, scope="function") 하나(DbDepends)로. 모든 라우트가 그 scope 인지 테스트(W4-3)가 막는다.
 - 왜: 기본 request scope 는 yield 뒤 commit 을 응답을 보낸 뒤 실행 → commit 실패해도 200, 멱등 미들웨어가 그 200 을 COMPLETED 로 캐시해 재시도까지 막혔다(테스트로 재현).
