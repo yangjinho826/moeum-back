@@ -1,5 +1,11 @@
 # 결정 기록
 
+## 2026-11-07 — DB commit 을 응답 전에(DbDepends = scope="function")
+- 결정: get_db 의존성을 전부 Depends(get_db, scope="function") 하나(DbDepends)로. 모든 라우트가 그 scope 인지 테스트(W4-3)가 막는다.
+- 왜: 기본 request scope 는 yield 뒤 commit 을 응답을 보낸 뒤 실행 → commit 실패해도 200, 멱등 미들웨어가 그 200 을 COMPLETED 로 캐시해 재시도까지 막혔다(테스트로 재현).
+- 버린 옵션: 핸들러마다 명시 commit(66곳·누락 위험) / 미들웨어가 비즈 세션 commit(소유권 꼬임) / Annotated 별칭 통일(기본값 순서 때문에 매개변수 재배치 필요).
+- 상세: .claude/plans/done/w4-commit-before-response.md · tests/idempotency/test_commit_order.py
+
 ## 2026-11-07 — 보관 통장은 목록엔 두고 합계에서만 뺀다
 - 결정: 홈·자산·투자 overview 의 total_balance·배분·투자 요약은 counts_in_totals(비보관)만. 계좌 목록은 전부 그대로. 월 박제도 같은 함수.
 - 왜: 박제는 보관 통장을 빼는데 현재 합계는 더해서 hero "지난 기록 대비" 증감이 그 잔액만큼 튀었다. 목록까지 거르면 API 로 보관된 통장을 앱에서 다시 열 길이 없다.
