@@ -5,7 +5,7 @@ from fastapi import Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.deps import get_current_active_user
-from app.core.database import get_db
+from app.core.database import DbDepends
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.household.model import Household
 from app.domain.household.repository import (
@@ -17,7 +17,7 @@ from app.domain.user.model import User
 
 async def get_current_household(
     current_user: Annotated[User, Depends(get_current_active_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, DbDepends],
     x_household_id: Annotated[UUID, Header(alias="X-Household-Id")],
 ) -> Household:
     """X-Household-Id 헤더 → 멤버십 검증 → Household 반환"""

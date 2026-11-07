@@ -1,11 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
-from app.core.database import get_db
+from app.core.database import DbDepends
 from app.core.pagination import CursorPage
 from app.domain.category import service
 from app.domain.category.schema import (
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/category", tags=["category"])
 async def list_categories(
     household: CurrentHousehold,
     q: Annotated[CategoryListQuery, Query()],
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[CursorPage[CategoryResponse]]:
     """카테고리 목록 (cursor 무한 스크롤) — searchTerm/kind/isArchived 필터"""
     response = await service.list_categories_cursor(
@@ -41,7 +41,7 @@ async def list_categories(
 async def create_category(
     req: CategoryCreateRequest,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[CategoryResponse]:
     """카테고리 생성"""
     response = await service.create_category(db, household, req)
@@ -52,7 +52,7 @@ async def create_category(
 async def get_category_detail(
     category_id: UUID,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[CategoryResponse]:
     """카테고리 단건 조회"""
     response = await service.get_category_detail(db, household, category_id)
@@ -64,7 +64,7 @@ async def update_category(
     category_id: UUID,
     req: CategoryUpdateRequest,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[CategoryResponse]:
     """카테고리 수정"""
     response = await service.update_category(db, household, category_id, req)
@@ -75,7 +75,7 @@ async def update_category(
 async def delete_category(
     category_id: UUID,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[None]:
     """카테고리 삭제 (soft)"""
     await service.delete_category(db, household, category_id)
