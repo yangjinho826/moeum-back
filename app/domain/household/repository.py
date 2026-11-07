@@ -22,6 +22,20 @@ class HouseholdRepository:
         )
         return result.scalar_one_or_none()
 
+    async def has_active_owned_by(self, user_id: UUID) -> bool:
+        """이 사용자가 owner 인 활성 가계부가 있나 — 멤버 초대(이메일 검색) 자격."""
+        result = await self.db.execute(
+            select(Household.id)
+            .where(
+                and_(
+                    Household.owner_id == user_id,
+                    Household.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
     async def find_active_by_user_id(self, user_id: UUID) -> list[Household]:
         """현재 user 가 멤버인 활성 가계부 목록"""
         stmt = (

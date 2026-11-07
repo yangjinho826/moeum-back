@@ -46,6 +46,7 @@ class UserCreateRequest(CamelBaseModel):
 class UserUpdateRequest(CamelBaseModel):
     name: str | None = None
     password: str | None = None
+    current_password: str | None = None  # password 를 바꿀 때만 필요 — 검증은 service(해시 비교)
     language: Literal["ko", "en"] | None = None
 
     @model_validator(mode="after")

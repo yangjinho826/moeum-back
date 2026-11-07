@@ -15,6 +15,7 @@ from app.domain.category.enum import CategoryKind
 from app.domain.category.model import Category
 from app.domain.category.repository import CategoryRepository
 from app.domain.fixed.repository import FixedRepository
+from app.domain.household.repository import HouseholdMemberRepository
 from app.domain.household.model import Household
 from app.domain.transaction.enum import TxType, ValuationDirection
 from app.domain.transaction.model import Transaction
@@ -154,6 +155,7 @@ async def create_transaction(
         db, household.id, account_ids, category_ids, tx_type=req.tx_type,
     )
     await _validate_fixed_belongs(db, household.id, req.fixed_expense_id)
+    await _validate_paid_by(db, household.id, req.paid_by_user_id)
 
     tx = Transaction(
         household_id=household.id,
@@ -363,6 +365,17 @@ async def _validate_fixed_belongs(
         return
     fixed = await FixedRepository(db).find_by_id(fixed_expense_id)
     if not fixed or fixed.household_id != household_id:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+
+async def _validate_paid_by(
+    db: AsyncSession, household_id: UUID, user_id: UUID | None,
+) -> None:
+    """결제자는 그 가계부 활성 멤버만 — 다른 가계부 사용자 id 가 섞이면 사람별 집계가 틀린다."""
+    if user_id is None:
+        return
+    member = await HouseholdMemberRepository(db).find_by_household_and_user(household_id, user_id)
+    if not member:
         raise CustomException(ErrorCode.NOT_FOUND)
 
 
@@ -618,6 +631,8 @@ async def _validate_update_fks(
             _check_category_kinds(categories, new_type)
     if "fixed_expense_id" in changed:
         await _validate_fixed_belongs(db, household.id, new["fixed_expense_id"])
+    if "paid_by_user_id" in changed:  # 안 바꾸면 통과 — 나간 멤버가 결제자인 옛 거래도 고칠 수 있게
+        await _validate_paid_by(db, household.id, new["paid_by_user_id"])
 
 
 def _apply_partial_update(tx: Transaction, req: TransactionUpdateRequest) -> None:
