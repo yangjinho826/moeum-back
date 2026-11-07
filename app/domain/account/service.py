@@ -288,6 +288,14 @@ async def _calc_balance(
     return await _calc_investment_balance(tx_repo, account, db, as_of)
 
 
+def counts_in_totals(account: Account | AccountResponse) -> bool:
+    """총자산·배분·투자 요약·월 박제에 들어가는 통장인가 — 보관 통장은 집계 밖(2026-11-07 정책).
+
+    목록(관리·표시)에는 남긴다 — 다시 열어 고치거나 보관을 풀 수 있게.
+    """
+    return not account.is_archived
+
+
 def _cash_flow(start_balance: Decimal, sums: dict[str, Decimal]) -> Decimal:
     """거래 합계로 잔액 산출 — 수입·이체입금 +, 지출·이체출금 -, 평가조정은 방향대로(valuation_net)."""
     return (

@@ -567,7 +567,10 @@ async def get_portfolio_overview(
     portfolios_by_account = _group_portfolios_by_account(items, account_map)
 
     return PortfolioOverviewResponse(
-        summary=_summarize_investment_accounts(investment_accounts),
+        # 보관 계좌는 목록엔 두고 합계에서만 뺀다 — 홈 레일 "투자"가 총자산과 같은 모집단
+        summary=_summarize_investment_accounts(
+            [a for a in investment_accounts if account_service.counts_in_totals(a)]
+        ),
         investment_accounts=[
             InvestmentAccountWithPortfolios(
                 account=a,

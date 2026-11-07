@@ -37,7 +37,10 @@ async def get_home_overview(
         year, month = _today_kst()
 
     accounts = await account_service.list_accounts(db, household)
-    total_balance = sum((a.balance for a in accounts), Decimal("0"))
+    # 보관 통장은 목록엔 두고 합계에서만 뺀다 — 월 박제와 같은 모집단이어야 hero 증감이 맞는다
+    total_balance = sum(
+        (a.balance for a in accounts if account_service.counts_in_totals(a)), Decimal("0"),
+    )
 
     tx_page = await transaction_service.list_transactions(
         db, household, TransactionFilter(), cursor=None, limit=RECENT_TX_LIMIT,
