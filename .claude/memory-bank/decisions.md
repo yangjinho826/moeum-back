@@ -1,5 +1,14 @@
 # 결정 기록
 
+## 2026-11-07 — 비번 변경은 현재 비번 확인 + 다른 기기 refresh 폐기 · 데모 비번/가계부 삭제 403 · 이메일 검색 횟수 제한 · 결제자 멤버 검증
+- 결정: PUT /user 비번 변경은 currentPassword 필수(10분 5회 제한) → 통과 시 그 사용자 refresh 폐기(요청 쿠키 토큰만 유지). refresh 토큰에 jti.
+- 데모(DEMO_SEED_ENABLED 이고 이메일 일치): 비번 변경·가계부 삭제 403 US006. /user/search 는 사용자별 분당 10회(429 CM006, 먼저 셈) + owner 가계부 보유. paid_by 는 그 가계부 멤버만.
+- 왜: 토큰만 훔쳐도 비번을 바꿔 계정을 가져갈 수 있었고 탈취 세션이 계속 갱신됨. 공개 데모 계정 비번 변경으로 체험 불가. 같은 초 두 로그인이 같은 refresh 문자열 → 500.
+- 버린 옵션: 요청자 토큰까지 폐기 / slowapi 의존성 / X-Household-Id 가계부 owner 검사(URL 가계부 멤버 화면과 어긋남).
+- 안 한 것: 가입 오라클·access 즉시 무효화·데모 검색 차단(팀 확인)·운영 중복 refresh 행 정리(실행 전 확인).
+- 외부 검토 미실시: Codex 모델 설정 400 → Claude 반박(Blocker 3 반영)·리뷰 2회·최종 리뷰(1건 수정).
+- 상세: .claude/plans/done/w7-auth-demo-guard.md · tests/domain/test_auth_guard_w7.py
+
 ## 2026-11-07 — 박제는 가계부 advisory lock + 활성 부분 unique, 매매는 종목 FOR UPDATE 를 첫 쓰기보다 먼저
 - 결정: 수동 박제(시세 upsert 뒤)·월 잡(가계부 루프 맨 위)이 pg_advisory_xact_lock(1001, hashtext(household)) 대기. account_snapshots·PVH 활성 (owner, 월) 부분 unique(중복 정리 리비전 분리).
 - 매매: buy·sell·종목 수정/삭제·거래 수정/삭제가 종목 SELECT FOR UPDATE 를 먼저, 거래 수정/삭제는 lock 뒤 tx refresh(삭제됐으면 404). 데모 purge 는 종목→매매거래 순, 시세 upsert 는 정렬 — lock 순서 통일.
