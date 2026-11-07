@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums.data_status import DataStatus
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
-from app.domain.account.service import _calc_balance
+from app.domain.account.service import _calc_balance, counts_in_totals
 from app.domain.account_snapshot.model import AccountSnapshot
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.account_snapshot.schema import (
@@ -226,7 +226,7 @@ async def _build_and_save_snapshot(
     as_of = _month_end(target_date)  # 그 달 말일 시점 잔액으로 박제
     accounts = [
         a for a in await AccountRepository(db).find_active_by_household_id(household.id)
-        if not a.is_archived
+        if counts_in_totals(a)
     ]
     if not accounts:
         # 계좌 없는 가계부 — 박제할 게 없음. replace 면 종목 박제도 정리.

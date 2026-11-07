@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums.data_status import DataStatus
 from app.domain.account.enum import AccountType
 from app.domain.account.repository import AccountRepository
+from app.domain.account.service import counts_in_totals
 from app.domain.household.model import Household
 from app.domain.market_price import service as market_price_service
 from app.domain.portfolio.model import PortfolioValueHistory
@@ -52,7 +53,7 @@ async def snapshot_household_portfolio(
     accounts = await account_repo.find_active_by_household_id(household.id)
     investment_accounts = [
         a for a in accounts
-        if a.account_type == AccountType.INVESTMENT and not a.is_archived
+        if a.account_type == AccountType.INVESTMENT and counts_in_totals(a)
     ]
 
     # 계좌별 holdings 모아 전체를 그 달 시가로 평가 (item 현재 code/market 기준, N+1 방지).
