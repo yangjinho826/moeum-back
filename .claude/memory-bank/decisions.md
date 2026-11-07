@@ -1,5 +1,19 @@
 # 결정 기록
 
+## 2026-11-07 — OTHER 시세는 종목 id 키로, 과거 값은 PVH 에서 backfill
+- 결정: market_price_history 의 OTHER 행 code = str(item_id), 컬럼 20→50. 옛 (code, OTHER) 행은 안 읽고, 각 종목이 그 달 박제에 쓴 PVH current_price 를 새 키로 옮긴다(리비전 분리).
+- 왜: code "" 를 여러 가계부가 공유해 월 잡 upsert 가 통째로 롤백되고(재현됨) 남의 수동가로 평가됐다. 옛 키 fallback 은 같은 공유 문제라 버림.
+- 버린 옵션: household_id/item_id 컬럼 추가(조회 경로 둘) / 옛 키 fallback / PVH 직접 조회(재박제 순서 의존).
+- 검증: pytest W2-1~7 + backfill 은 테스트 DB 수동 왕복만(자동 테스트 없음). 외부 검토: Codex 401 → Claude 새 컨텍스트 반박·최종 리뷰로 대체.
+- 상세: .claude/plans/done/w2-other-price-key.md · 리비전 b7d1e3f5a9c2, c2e4a6b8d0f1
+
+## 2026-11-07 — 전체 점검 후속을 W1~W8 로 나눠 순서대로 (풀오토)
+- 결정: 계산식·도메인 버그·입력 편의 점검 결과를 W1(팝업 지출) → W2(OTHER 시세 키) → W3(보관 통장 총자산 제외) → W4(응답 전 commit) → W5(거래·계좌 무결성) → W6(박제 unique·매도 lock) → W7(인증·데모 보호) → W8(입력 편의) 로.
+- 왜: 한 루프로 가면 리뷰·커밋이 섞이고 위험 작업(W6·W7)은 반박·Codex 가 따로 필요. 잡 전체 롤백(W2)·사용자가 본 숫자(W1)가 먼저.
+- 버린 옵션: 한 루프 / B1 에 household_id 컬럼(마이그레이션 비용) / 백엔드 total_expense 에 고정지출 합산(계좌 리포트 의미 꼬임) / 새 필터값 SPEND.
+- 정책: 보관 통장은 총자산·배분에서 제외(박제와 같은 기준). push 안 함 · W6 마이그레이션은 테스트 DB 만 · 데모는 비번·이메일·가계부 삭제만 차단.
+- 상세: 마스터 plan `../.claude/plans/cosmic-napping-locket.md`
+
 > `/decide` 호출 시 결정 결과가 여기에 자동 append.
 > 형식: `YYYY-MM-DD: <주제> — <선택 옵션> (<근거>)`
 
