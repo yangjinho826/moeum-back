@@ -1,5 +1,12 @@
 # 결정 기록
 
+## 2026-11-07 — 보관 통장은 목록엔 두고 합계에서만 뺀다
+- 결정: 홈·자산·투자 overview 의 total_balance·배분·투자 요약은 counts_in_totals(비보관)만. 계좌 목록은 전부 그대로. 월 박제도 같은 함수.
+- 왜: 박제는 보관 통장을 빼는데 현재 합계는 더해서 hero "지난 기록 대비" 증감이 그 잔액만큼 튀었다. 목록까지 거르면 API 로 보관된 통장을 앱에서 다시 열 길이 없다.
+- 결과: 마지막 박제 뒤에 보관하면 그달 증감이 잔액만큼 − 로 보인다(자산이 집계 밖으로 나간 것 — 의도).
+- 버린 옵션: 박제에 보관 포함(사용자 A 선택) / 목록도 거르기(리뷰 finding) / 프론트에서 거르기(합계가 백엔드).
+- 상세: .claude/plans/done/w3-archived-out-of-totals.md
+
 ## 2026-11-07 — OTHER 시세는 종목 id 키로, 과거 값은 PVH 에서 backfill
 - 결정: market_price_history 의 OTHER 행 code = str(item_id), 컬럼 20→50. 옛 (code, OTHER) 행은 안 읽고, 각 종목이 그 달 박제에 쓴 PVH current_price 를 새 키로 옮긴다(리비전 분리).
 - 왜: code "" 를 여러 가계부가 공유해 월 잡 upsert 가 통째로 롤백되고(재현됨) 남의 수동가로 평가됐다. 옛 키 fallback 은 같은 공유 문제라 버림.

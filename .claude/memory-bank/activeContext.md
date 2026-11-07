@@ -104,7 +104,7 @@ Stage 4(종목 KRW 진실)와 같은 계좌 안에서 충돌하기 때문. 대�
 
 ## Next Step
 
-- 진행중: 단계 4/8 · .claude/plans/w3-archived-out-of-totals.md (마스터 ../.claude/plans/cosmic-napping-locket.md) · W3 · 시작 ea53726 · finding 0
+- 진행중: 단계 4/8 · .claude/plans/w4-commit-before-response.md (마스터 ../.claude/plans/cosmic-napping-locket.md) · W4 · 시작 ea53726 · finding 0
 0. **[현재 트랙] MVP 추가개발** — 1단계 완료(미커밋). **2단계 = 수수료** 착수 전 사용자 확인. 3단계는 2단계 fee 를 카드에 쓰므로 순서 고정. 계획 `~/.claude/plans/wobbly-prancing-pebble.md`.
 1. ~~**로드맵 1번 전체**~~ **완료** — 테스트 49(⓪ smoke / A 멱등성 14 / B advisory lock 8 / C fault-injection 3 / D 도메인 21) + CI 게이트(ci.yml·deploy.yml → test.yml reusable 공유) + 포폴 실측값 반영. 상세 이력은 Status 참조.
 2. ~~**포폴 카드 확정**~~ **완료** (2026-07-30) — 4장 + 보조 2장, 백필 제거. 정본 `carrer/portfolio/household-back.md`, 이력서 블록 `carrer/resume/household-이력서-블록.md`.
