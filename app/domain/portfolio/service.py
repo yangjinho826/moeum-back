@@ -130,7 +130,8 @@ async def buy(
     item_repo = PortfolioItemRepository(db)
     pt_repo = PortfolioTransactionRepository(db)
 
-    item = await item_repo.find_by_id(item_id)
+    # 같은 종목 매매는 줄 세움 — 동시 매도가 둘 다 보유 검사를 통과하지 않게
+    item = await item_repo.find_by_id_for_update(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -171,7 +172,8 @@ async def update_portfolio(
 ) -> PortfolioResponse:
     """평가액/메타 수정 (transaction 무관)"""
     repo = PortfolioItemRepository(db)
-    item = await repo.find_by_id(item_id)
+    # 보관의 수량 검사가 동시 매수와 엇갈리지 않게 잠근다
+    item = await repo.find_by_id_for_update(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -202,7 +204,8 @@ async def sell(
     item_repo = PortfolioItemRepository(db)
     pt_repo = PortfolioTransactionRepository(db)
 
-    item = await item_repo.find_by_id(item_id)
+    # 같은 종목 매매는 줄 세움 — 동시 매도가 둘 다 보유 검사를 통과하지 않게
+    item = await item_repo.find_by_id_for_update(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -253,6 +256,10 @@ async def update_portfolio_transaction(
     tx = await pt_repo.find_by_id(tx_id)
     if not tx or tx.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
+    item = await _lock_item_of(db, tx)  # 거래 행을 쓰기 전에 — 순서가 반대면 매매와 서로 기다린다
+    await db.refresh(tx)  # lock 을 기다리는 사이 커밋된 수정·삭제를 반영 — 옛 값으로 재계산하지 않게
+    if tx.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
 
     if req.quantity is not None:
         tx.quantity = req.quantity
@@ -267,12 +274,8 @@ async def update_portfolio_transaction(
     await db.flush()
 
     # 종목 재계산 (tx 는 BUY/SELL 모두 portfolio_item_id 보유)
-    # 전량매도로 죽은 종목도 재계산 대상이라 상태 무관 조회.
-    if tx.portfolio_item_id:
-        item_repo = PortfolioItemRepository(db)
-        item = await item_repo.find_by_id_any_status(tx.portfolio_item_id)
-        if item:
-            await _recalc_item_from_transactions(db, item)
+    if item:
+        await _recalc_item_from_transactions(db, item)
 
     logger.info("거래 수정 (tx_id=%s)", tx_id)
 
@@ -288,15 +291,16 @@ async def delete_portfolio_transaction(
     tx = await pt_repo.find_by_id(tx_id)
     if not tx or tx.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
+    item = await _lock_item_of(db, tx)  # 거래 행을 쓰기 전에 — 순서가 반대면 매매와 서로 기다린다
+    await db.refresh(tx)  # lock 을 기다리는 사이 커밋된 수정·삭제를 반영 — 옛 값으로 재계산하지 않게
+    if tx.data_stat_cd != DataStatus.ACTIVE:
+        raise CustomException(ErrorCode.NOT_FOUND)
 
     tx.data_stat_cd = DataStatus.DELETED
     await db.flush()
 
-    if tx.portfolio_item_id:
-        item_repo = PortfolioItemRepository(db)
-        item = await item_repo.find_by_id_any_status(tx.portfolio_item_id)
-        if item:
-            await _recalc_item_from_transactions(db, item)
+    if item:
+        await _recalc_item_from_transactions(db, item)
 
     logger.info("거래 삭제 (tx_id=%s)", tx_id)
 
@@ -309,7 +313,8 @@ async def delete_portfolio(
     보유수량>0 이면 차단 — 먼저 전량 매도해야 삭제 가능(전량 매도는 qty=0 라 통과).
     """
     repo = PortfolioItemRepository(db)
-    item = await repo.find_by_id(item_id)
+    # 수량 검사가 동시 매수와 엇갈려 "삭제됐는데 수량 남음" 이 되지 않게 잠근다
+    item = await repo.find_by_id_for_update(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
     if item.quantity > 0:
@@ -362,8 +367,9 @@ async def get_realized_pnl_by_item(
 
     증권사 '매매손익' 화면과 동일 구성. 기간 미지정 시 최근 12개월.
     구버전 SELL(realized=NULL) 은 0 으로 간주해 합계 왜곡 방지.
+    전량 매도로 DELETED 된 종목도 매도 이력은 남으니 상태 무관 조회.
     """
-    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    item = await PortfolioItemRepository(db).find_by_id_any_status(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -567,7 +573,10 @@ async def get_portfolio_overview(
     portfolios_by_account = _group_portfolios_by_account(items, account_map)
 
     return PortfolioOverviewResponse(
-        summary=_summarize_investment_accounts(investment_accounts),
+        # 보관 계좌는 목록엔 두고 합계에서만 뺀다 — 홈 레일 "투자"가 총자산과 같은 모집단
+        summary=_summarize_investment_accounts(
+            [a for a in investment_accounts if account_service.counts_in_totals(a)]
+        ),
         investment_accounts=[
             InvestmentAccountWithPortfolios(
                 account=a,
@@ -614,8 +623,8 @@ async def list_item_transactions_cursor(
     limit: int,
 ) -> PortfolioTxPage:
     """종목 단건 거래 내역 — 무한 스크롤. transaction 패턴 그대로."""
-    # 종목 소유권 검증
-    item = await PortfolioItemRepository(db).find_by_id(item_id)
+    # 종목 소유권 검증 — 전량 매도로 DELETED 된 종목도 거래 내역은 남아 상태 무관 조회
+    item = await PortfolioItemRepository(db).find_by_id_any_status(item_id)
     if not item or item.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
@@ -769,6 +778,18 @@ def _recompute_realized_pnl(
             running_cost -= running_avg * t.quantity
             running_qty -= t.quantity
     return running_qty, running_cost
+
+
+async def _lock_item_of(db: AsyncSession, tx: PortfolioTransaction) -> PortfolioItem | None:
+    """거래가 속한 종목을 잠가 가져온다 — 전량매도로 죽은 종목도 재계산 대상이라 상태 무관.
+
+    매매 경로는 모두 "종목 lock → 거래 행 쓰기" 순서다. 거래 행을 먼저 잡으면, 그 종목을 잡고
+    실현손익 재박제로 이 행을 고치려는 매매와 서로 기다린다(데드락)."""
+    if not tx.portfolio_item_id:
+        return None
+    return await PortfolioItemRepository(db).find_by_id_for_update(
+        tx.portfolio_item_id, any_status=True,
+    )
 
 
 async def _recalc_item_from_transactions(

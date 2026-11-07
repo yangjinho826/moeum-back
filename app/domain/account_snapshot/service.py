@@ -2,14 +2,16 @@ import logging
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
 from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
-from app.domain.account.service import _calc_balance
+from app.domain.account.service import _calc_balance, counts_in_totals
 from app.domain.account_snapshot.model import AccountSnapshot
 from app.domain.account_snapshot.repository import AccountSnapshotRepository
 from app.domain.account_snapshot.schema import (
@@ -29,6 +31,19 @@ KST = ZoneInfo("Asia/Seoul")
 
 # catch-up 으로 거슬러 올라가 빠진 달을 채울 최근 개월 수
 SNAPSHOT_CATCHUP_MONTHS = 12
+
+# 박제 advisory lock 의 키 공간 — 2인자 형식이라 잡 lock(hashtext(잡 이름), 1인자)과 겹치지 않는다
+SNAPSHOT_LOCK_NS = 1001
+
+
+async def _lock_household_snapshot(db: AsyncSession, household_id: UUID) -> None:
+    """가계부 박제 직렬화 — 대기형 트랜잭션 lock, commit/rollback 에 자동 해제.
+
+    "그 달 있나 → (지우고) 넣기" 가 겹치면 통장마다 2벌이 된다(yearly 합계 2배)."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, hashtext(:hid))"),
+        {"ns": SNAPSHOT_LOCK_NS, "hid": str(household_id)},
+    )
 
 
 async def create_monthly_snapshots_for_all(db: AsyncSession) -> int:
@@ -55,6 +70,7 @@ async def create_monthly_snapshots_for_all(db: AsyncSession) -> int:
 
     saved = 0
     for h in households:
+        await _lock_household_snapshot(db, h.id)  # 그 가계부 수동 박제와 직렬화 — 잡 커밋까지 유지
         # catch-up 하한 = 기존 최古 박제월. 박제 이력 없으면 지난달만(첫 박제).
         oldest = await repo.oldest_active_month(h.id)
         catchup_floor = oldest if oldest else target_date
@@ -88,6 +104,9 @@ async def create_target_month_snapshot(
     # 수동 박제도 시가 반영 — 그 가계부 종목 시세 먼저 확보.
     await market_price_service.backfill_yahoo_monthly(db, household.id, range_="2y")
     await market_price_service.snapshot_other_prices(db, target_date, household.id)
+    # 시세 upsert 뒤에 잡는다 — 잡은 시세 행 lock 을 쥔 채 가계부 lock 을 차례로 잡으므로,
+    # 먼저 가계부 lock 을 쥐고 시세 행을 기다리면 서로 기다리는 데드락이 된다
+    await _lock_household_snapshot(db, household.id)
     exists = await repo.has_active_for_month(household.id, target_date)
     result = await _build_and_save_snapshot(db, household, target_date, replace=exists)
     logger.info(
@@ -226,7 +245,7 @@ async def _build_and_save_snapshot(
     as_of = _month_end(target_date)  # 그 달 말일 시점 잔액으로 박제
     accounts = [
         a for a in await AccountRepository(db).find_active_by_household_id(household.id)
-        if not a.is_archived
+        if counts_in_totals(a)
     ]
     if not accounts:
         # 계좌 없는 가계부 — 박제할 게 없음. replace 면 종목 박제도 정리.

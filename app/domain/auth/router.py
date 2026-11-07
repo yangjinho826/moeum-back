@@ -1,12 +1,12 @@
 import logging
 
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Cookie, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import DbDepends
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.auth import service
 from app.domain.auth.schema import LoginRequest, RefreshResponse, TokenResponse
@@ -50,7 +50,7 @@ def _refresh_failure_response(error: ErrorCode) -> JSONResponse:
 
 @router.post("/login")
 async def login(
-    req: LoginRequest, response: Response, db: AsyncSession = Depends(get_db),
+    req: LoginRequest, response: Response, db: AsyncSession = DbDepends,
 ) -> ApiResponse[TokenResponse]:
     """로그인 후 JWT 토큰 발급"""
     token_response, refresh_token = await service.login(db, req)
@@ -60,7 +60,7 @@ async def login(
 
 @router.post("/refresh")
 async def refresh(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
     refresh_token: str | None = Cookie(None, alias=_REFRESH_COOKIE_KEY),
 ) -> ApiResponse[RefreshResponse]:
     """Refresh Token으로 새 Access Token 발급.
@@ -81,7 +81,7 @@ async def refresh(
 @router.post("/logout")
 async def logout(
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
     refresh_token: str | None = Cookie(None, alias=_REFRESH_COOKIE_KEY),
 ) -> ApiResponse[None]:
     """로그아웃 (refresh token DB 폐기 + 쿠키 삭제)"""

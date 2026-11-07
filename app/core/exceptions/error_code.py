@@ -11,6 +11,7 @@ class ErrorCode(Enum):
     FORBIDDEN = (403, "CM003", "권한이 없습니다.")
     NOT_FOUND = (400, "CM004", "데이터를 찾을 수 없습니다.")
     SERVICE_UNAVAILABLE = (503, "CM005", "서비스를 사용할 수 없습니다.")
+    TOO_MANY_REQUESTS = (429, "CM006", "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
     INTERNAL_ERROR = (500, "CM999", "서버 오류가 발생했습니다.")
 
     # 인증 (AU)
@@ -26,6 +27,7 @@ class ErrorCode(Enum):
     INVALID_EMAIL_FORMAT = (400, "US003", "올바른 이메일 형식이 아닙니다.")
     INVALID_PASSWORD_FORMAT = (400, "US004", "비밀번호는 8~64자, 영문과 숫자를 포함해야 합니다.")
     INVALID_NAME = (400, "US005", "이름은 1~100자여야 합니다.")
+    DEMO_READ_ONLY = (403, "US006", "체험 계정에서는 할 수 없는 작업입니다.")
 
     # 가계부 그룹 (HH)
     HOUSEHOLD_NOT_MEMBER = (403, "HH001", "해당 가계부의 멤버가 아닙니다.")
@@ -41,6 +43,10 @@ class ErrorCode(Enum):
 
     # 통장 (AC)
     ACCOUNT_HAS_DEPENDENTS = (400, "AC001", "보유 종목이 있는 통장은 삭제할 수 없습니다. 먼저 전량 매도하세요.")
+    ACCOUNT_TYPE_LOCKED = (400, "AC002", "거래나 종목이 있는 통장은 투자·자산·일반 사이로 종류를 바꿀 수 없습니다.")
+
+    # 카테고리 (CT)
+    CATEGORY_IN_USE = (400, "CT001", "거래가 있는 카테고리는 수입/지출 구분을 바꿀 수 없습니다.")
 
     # 멱등성 (ID)
     IDEMPOTENCY_KEY_CONFLICT = (422, "ID001", "다른 요청에 사용된 키입니다.")

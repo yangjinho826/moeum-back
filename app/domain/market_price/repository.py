@@ -35,7 +35,8 @@ class MarketPriceHistoryRepository:
                 "last_mdfcn_dt": now,
                 "data_stat_cd": DataStatus.ACTIVE,
             }
-            for r in rows
+            # 행 lock 을 늘 같은 순서로 잡게 정렬 — 월 잡과 수동 박제가 반대 순서로 잡으면 데드락
+            for r in sorted(rows, key=lambda r: (r["market"], r["code"], r["price_date"]))
         ]
         stmt = pg_insert(MarketPriceHistory).values(values)
         stmt = stmt.on_conflict_do_update(

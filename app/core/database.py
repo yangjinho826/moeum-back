@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 
+from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -44,7 +45,7 @@ async def close_db() -> None:
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """DB 세션 의존성"""
+    """DB 세션 의존성 — 직접 Depends(get_db) 말고 DbDepends 로 받는다(이유는 아래 DbDepends)"""
     async with async_session() as session:
         try:
             yield session
@@ -52,3 +53,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+# scope="function": 경로 함수가 끝나면 commit 하고 **그 다음** 응답한다. 기본(request)이면
+# 응답을 보낸 뒤 commit 이라 commit 이 실패해도 클라이언트는 200 을 받고, 멱등 미들웨어가
+# 그 200 을 캐시해 재시도까지 막는다. 한 요청 안의 사용처가 모두 이 객체를 써야 세션 하나를 공유한다.
+DbDepends = Depends(get_db, scope="function")

@@ -166,7 +166,8 @@ async def update_account(
 
     if req.name is not None:
         account.name = req.name.strip()
-    if req.account_type is not None:
+    if req.account_type is not None and req.account_type != account.account_type:
+        await _guard_account_type_change(db, account, req.account_type)
         account.account_type = req.account_type
     if req.start_balance is not None:
         account.start_balance = req.start_balance
@@ -183,6 +184,33 @@ async def update_account(
     tx_repo = TransactionRepository(db)
     summary = await _calc_balance(tx_repo, account, db)
     return _build_response(account, summary)
+
+
+def _type_group(account_type: str) -> str:
+    """잔액 공식이 같은 묶음 — 투자(현금+평가) / 수동자산(이체·평가조정만) / 일반(현금흐름)."""
+    if account_type == AccountType.INVESTMENT:
+        return "investment"
+    if account_type in MANUAL_ASSET_ACCOUNT_TYPES:
+        return "manual"
+    return "cash"
+
+
+async def _guard_account_type_change(
+    db: AsyncSession, account: Account, new_type: AccountType,
+) -> None:
+    """묶음이 바뀌는 타입 변경은 이력이 없을 때만.
+
+    투자↔일반이면 잔액에서 종목 평가액이 빠지거나 붙고(배분에는 남음), 일반→수동자산이면
+    허용되지 않는 지출·수입이 남는다. 같은 묶음 안(부동산→연금)은 공식이 같아 허용.
+    """
+    if _type_group(account.account_type) == _type_group(new_type):
+        return
+    if (
+        await TransactionRepository(db).has_active_for_account(account.id)
+        or await PortfolioItemRepository(db).count_active_by_account_id(account.id) > 0
+        or await PortfolioTransactionRepository(db).has_active_for_account(account.id)
+    ):
+        raise CustomException(ErrorCode.ACCOUNT_TYPE_LOCKED)
 
 
 async def delete_account(
@@ -286,6 +314,14 @@ async def _calc_balance(
     if account.account_type != AccountType.INVESTMENT:
         return await _calc_cash_balance(tx_repo, account, as_of)
     return await _calc_investment_balance(tx_repo, account, db, as_of)
+
+
+def counts_in_totals(account: Account | AccountResponse) -> bool:
+    """총자산·배분·투자 요약·월 박제에 들어가는 통장인가 — 보관 통장은 집계 밖(2026-11-07 정책).
+
+    목록(관리·표시)에는 남긴다 — 다시 열어 고치거나 보관을 풀 수 있게.
+    """
+    return not account.is_archived
 
 
 def _cash_flow(start_balance: Decimal, sums: dict[str, Decimal]) -> Decimal:

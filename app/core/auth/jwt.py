@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from jose import jwt
 
@@ -40,7 +41,8 @@ def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> 
         expires_delta if expires_delta
         else timedelta(seconds=settings.JWT_REFRESH_EXPIRATION)
     )
-    to_encode.update({"exp": expire, "type": TokenType.REFRESH})
+    # jti: 같은 초에 발급해도 문자열이 달라야 DB 조회·폐기가 기기 하나만 가리킨다
+    to_encode.update({"exp": expire, "type": TokenType.REFRESH, "jti": uuid4().hex})
     return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

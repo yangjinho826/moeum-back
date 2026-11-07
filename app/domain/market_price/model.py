@@ -24,7 +24,9 @@ class MarketPriceHistory(BaseEntity):
         Index("ix_market_price_lookup", "code", "market", "price_date"),
     )
 
-    code: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 야후 종목은 티커, OTHER 는 종목 id(UUID 36자) — 가계부마다 수동가가 달라 종목 단위 키.
+    # 길이는 portfolio_items.code 와 같게(긴 티커도 upsert 에서 잘리지 않게)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
     market: Mapped[str] = mapped_column(String(20), nullable=False)
     price_date: Mapped[date] = mapped_column(Date, nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)

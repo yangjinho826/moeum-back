@@ -6,6 +6,8 @@
 
 ## Status
 
+- [x] 2026-11-07 W2~W7 점검 수정(OTHER 가격 키·보관 제외·커밋 순서·거래 정합성·박제 유일·인증 보호) — fix/w2~w7 로컬, push 안 함
+
 **🚀 거래 탭 통장 필터 배포 완료 (2026-09-20). back `v0.13.0` → front `v0.15.0` 순서.**
 거래 탭 좌우(목록 vs 요약·달력·지출Top5) 숫자가 어긋나던 문제. 집계 3개(`sum_by_type_for_month`·
 `sum_by_category_for_month`·`daily_sums_for_month`)와 `/stats/monthly`·`/transaction/calendar/{y}/{m}/full`

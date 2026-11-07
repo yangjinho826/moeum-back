@@ -9,10 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.account.enum import MANUAL_ASSET_ACCOUNT_TYPES
+from app.domain.account.model import Account
 from app.domain.account.repository import AccountRepository
 from app.domain.category.enum import CategoryKind
+from app.domain.category.model import Category
 from app.domain.category.repository import CategoryRepository
 from app.domain.fixed.repository import FixedRepository
+from app.domain.household.repository import HouseholdMemberRepository
 from app.domain.household.model import Household
 from app.domain.transaction.enum import TxType, ValuationDirection
 from app.domain.transaction.model import Transaction
@@ -152,6 +155,7 @@ async def create_transaction(
         db, household.id, account_ids, category_ids, tx_type=req.tx_type,
     )
     await _validate_fixed_belongs(db, household.id, req.fixed_expense_id)
+    await _validate_paid_by(db, household.id, req.paid_by_user_id)
 
     tx = Transaction(
         household_id=household.id,
@@ -187,11 +191,15 @@ async def update_transaction(
     if not tx or tx.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    await _validate_update_fks(db, household, tx, req)
+    changed = _changed_fields(tx, req)  # 병합 전 기준 — 안 바뀐 FK·옛 행은 다시 막지 않는다
+    await _validate_update_fks(db, household, tx, req, changed)
     _apply_partial_update(tx, req)
     _normalize_to_account(tx)
     _normalize_category(tx)
+    _normalize_valuation(tx)
+    _normalize_fixed(tx)
     _validate_transfer_consistency(tx)
+    _validate_type_requirements(tx, changed)
 
     await db.flush()
     return await _single_response(db, tx)
@@ -360,6 +368,17 @@ async def _validate_fixed_belongs(
         raise CustomException(ErrorCode.NOT_FOUND)
 
 
+async def _validate_paid_by(
+    db: AsyncSession, household_id: UUID, user_id: UUID | None,
+) -> None:
+    """결제자는 그 가계부 활성 멤버만 — 다른 가계부 사용자 id 가 섞이면 사람별 집계가 틀린다."""
+    if user_id is None:
+        return
+    member = await HouseholdMemberRepository(db).find_by_household_and_user(household_id, user_id)
+    if not member:
+        raise CustomException(ErrorCode.NOT_FOUND)
+
+
 async def _validate_fk_belong_to_household(
     db: AsyncSession,
     household_id: UUID,
@@ -379,16 +398,8 @@ async def _validate_fk_belong_to_household(
         for a in accounts:
             if a.household_id != household_id or a.data_stat_cd != DataStatus.ACTIVE:
                 raise CustomException(ErrorCode.NOT_FOUND)
-        if tx_type == TxType.VALUATION:
-            # 평가조정은 수동자산 통장에만 의미 — 그 외 통장이면 차단.
-            for a in accounts:
-                if a.account_type not in MANUAL_ASSET_ACCOUNT_TYPES:
-                    raise CustomException(ErrorCode.BAD_REQUEST)
-        elif tx_type is not None and tx_type != TxType.TRANSFER:
-            # 수동자산 통장엔 이체·평가조정만 허용 — 지출/수입 차단.
-            for a in accounts:
-                if a.account_type in MANUAL_ASSET_ACCOUNT_TYPES:
-                    raise CustomException(ErrorCode.BAD_REQUEST)
+        if tx_type is not None:
+            _check_account_types(accounts, tx_type)
     if category_ids:
         categories = await CategoryRepository(db).find_by_ids(category_ids)
         if len(categories) != len(set(category_ids)):
@@ -396,8 +407,23 @@ async def _validate_fk_belong_to_household(
         for c in categories:
             if c.household_id != household_id or c.data_stat_cd != DataStatus.ACTIVE:
                 raise CustomException(ErrorCode.NOT_FOUND)
-            if tx_type is not None and not _category_kind_matches(tx_type, c.kind):
-                raise CustomException(ErrorCode.BAD_REQUEST)
+        if tx_type is not None:
+            _check_category_kinds(categories, tx_type)
+
+
+def _check_account_types(accounts: list[Account], tx_type: TxType) -> None:
+    """평가조정은 수동자산 통장에만, 지출/수입은 수동자산 통장엔 안 된다(이체는 어디든)."""
+    if tx_type == TxType.VALUATION:
+        if any(a.account_type not in MANUAL_ASSET_ACCOUNT_TYPES for a in accounts):
+            raise CustomException(ErrorCode.BAD_REQUEST)
+    elif tx_type != TxType.TRANSFER:
+        if any(a.account_type in MANUAL_ASSET_ACCOUNT_TYPES for a in accounts):
+            raise CustomException(ErrorCode.BAD_REQUEST)
+
+
+def _check_category_kinds(categories: list[Category], tx_type: TxType) -> None:
+    if any(not _category_kind_matches(tx_type, c.kind) for c in categories):
+        raise CustomException(ErrorCode.BAD_REQUEST)
 
 
 def _build_response(
@@ -547,37 +573,72 @@ def _build_ledger_items(
     return items, running
 
 
+# NOT NULL 컬럼 — 요청의 None 은 "안 바꿈". 나머지(선택 필드)는 요청에 명시되면 None 도 값(해제)
+_TX_REQUIRED_FIELDS = ("tx_type", "amount", "tx_date", "account_id")
+
+
+def _requested(req: TransactionUpdateRequest, tx: Transaction, field: str):
+    """병합 뒤 값. 프론트는 상세값 전체를 보내므로 사용자가 지운 칸은 None 으로 온다."""
+    value = getattr(req, field)
+    if field in _TX_REQUIRED_FIELDS:
+        return value if value is not None else getattr(tx, field)
+    return value if field in req.model_fields_set else getattr(tx, field)
+
+
+def _changed_fields(tx: Transaction, req: TransactionUpdateRequest) -> set[str]:
+    return {f for f in _TX_UPDATABLE_FIELDS if _requested(req, tx, f) != getattr(tx, f)}
+
+
 async def _validate_update_fks(
     db: AsyncSession,
     household: Household,
     tx: Transaction,
     req: TransactionUpdateRequest,
+    changed: set[str],
 ) -> None:
-    """변경 후 FK(계좌·이체상대·카테고리)가 같은 household 소속인지 검증."""
-    new_account_id = req.account_id if req.account_id is not None else tx.account_id
-    new_to_account_id = req.to_account_id if req.to_account_id is not None else tx.to_account_id
-    new_category_id = req.category_id if req.category_id is not None else tx.category_id
+    """**바뀌는** FK(계좌·이체상대·카테고리·고정지출)만 소속·ACTIVE 검증.
 
-    fk_accounts = [new_account_id]
-    if new_to_account_id is not None:
-        fk_accounts.append(new_to_account_id)
-    fk_categories = [new_category_id] if new_category_id else []
-    new_tx_type = req.tx_type if req.tx_type is not None else TxType(tx.tx_type)
-    await _validate_fk_belong_to_household(
-        db, household.id, fk_accounts, fk_categories, tx_type=new_tx_type,
-    )
-    new_fixed_id = (
-        req.fixed_expense_id if req.fixed_expense_id is not None else tx.fixed_expense_id
-    )
-    await _validate_fixed_belongs(db, household.id, new_fixed_id)
+    안 바꾼 값까지 보면 삭제된 고정지출·카테고리·상대 통장이 걸린 거래는 메모 하나도 못 고친다.
+    계좌 규칙(수동자산엔 이체·평가조정만)과 카테고리 kind 는 타입이 바뀔 때 남은 값에도 다시 본다
+    (삭제 여부는 안 따짐).
+    """
+    new = {f: _requested(req, tx, f) for f in _TX_UPDATABLE_FIELDS}
+    new_type = TxType(new["tx_type"])
+
+    if changed & {"tx_type", "account_id", "to_account_id"}:
+        ids = [new["account_id"]]
+        if new_type == TxType.TRANSFER and new["to_account_id"] is not None:
+            ids.append(new["to_account_id"])
+        # 소속·ACTIVE 는 새로 고른 통장만 — 이미 삭제된 상대 통장이 남아 있어도 출발 통장은 바꿀 수 있게
+        fresh = [i for f, i in zip(("account_id", "to_account_id"), ids) if f in changed]
+        # 유형이 바뀌면 출발 통장에 새로 거는 셈 — 삭제된 통장에 단독 거래가 생기지 않게
+        if "tx_type" in changed and "account_id" not in changed:
+            fresh.append(new["account_id"])
+        await _validate_fk_belong_to_household(db, household.id, fresh, [])
+        _check_account_types(await AccountRepository(db).find_by_ids(ids), new_type)
+    # 이체·평가조정은 카테고리를 정규화로 지우므로 검증할 필요가 없다
+    if (
+        changed & {"tx_type", "category_id"}
+        and new["category_id"] is not None
+        and new_type not in (TxType.TRANSFER, TxType.VALUATION)
+    ):
+        if "category_id" in changed:
+            await _validate_fk_belong_to_household(
+                db, household.id, [], [new["category_id"]], tx_type=new_type,
+            )
+        else:  # 안 바꾼 카테고리(삭제됐을 수 있음)는 kind 만
+            categories = await CategoryRepository(db).find_by_ids([new["category_id"]])
+            _check_category_kinds(categories, new_type)
+    if "fixed_expense_id" in changed:
+        await _validate_fixed_belongs(db, household.id, new["fixed_expense_id"])
+    if "paid_by_user_id" in changed:  # 안 바꾸면 통과 — 나간 멤버가 결제자인 옛 거래도 고칠 수 있게
+        await _validate_paid_by(db, household.id, new["paid_by_user_id"])
 
 
 def _apply_partial_update(tx: Transaction, req: TransactionUpdateRequest) -> None:
-    """요청에 들어온(None 아닌) 필드만 tx 에 병합."""
+    """요청 병합 — 필수 필드는 None 이면 유지, 선택 필드는 명시된 None 으로 해제."""
     for field in _TX_UPDATABLE_FIELDS:
-        value = getattr(req, field)
-        if value is not None:
-            setattr(tx, field, value)
+        setattr(tx, field, _requested(req, tx, field))
 
 
 def _normalize_to_account(tx: Transaction) -> None:
@@ -594,6 +655,35 @@ def _normalize_category(tx: Transaction) -> None:
     "통장별 합 > 가계부 전체" 가 된다 — _normalize_to_account 와 같은 이유다."""
     if tx.tx_type == TxType.TRANSFER:
         tx.category_id = None
+
+
+def _normalize_valuation(tx: Transaction) -> None:
+    """평가조정엔 카테고리가 없고, 그 외 타입엔 방향이 없다 — 생성 schema 와 같은 규칙을
+    타입 전환에도. 남은 카테고리는 카테고리 차트엔 잡히고 월 지출엔 안 잡혀 둘이 어긋난다."""
+    if tx.tx_type == TxType.VALUATION:
+        tx.category_id = None
+    else:
+        tx.valuation_direction = None
+
+
+def _normalize_fixed(tx: Transaction) -> None:
+    """고정지출 연결은 FIXED_EXPENSE 만 — 지출로 바꿨는데 남으면 고정지출 사용액에 계속 잡힌다."""
+    if tx.tx_type != TxType.FIXED_EXPENSE:
+        tx.fixed_expense_id = None
+
+
+def _validate_type_requirements(tx: Transaction, changed: set[str]) -> None:
+    """타입별 필수값 — 전환 뒤에도 생성 schema 와 같게.
+
+    방향 없는 평가조정은 잔액 계산에서 감소로 처리돼 금액이 틀린다(sum_for_account).
+    관련 칸을 안 건드린 수정은 통과 — 옛 규칙으로 저장된 행도 메모는 고칠 수 있게.
+    """
+    if not changed & {"tx_type", "valuation_direction", "fixed_expense_id"}:
+        return
+    if tx.tx_type == TxType.VALUATION and tx.valuation_direction is None:
+        raise CustomException(ErrorCode.BAD_REQUEST)
+    if tx.tx_type == TxType.FIXED_EXPENSE and tx.fixed_expense_id is None:
+        raise CustomException(ErrorCode.BAD_REQUEST)
 
 
 def _validate_transfer_consistency(tx: Transaction) -> None:

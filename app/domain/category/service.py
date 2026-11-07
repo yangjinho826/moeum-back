@@ -14,7 +14,9 @@ from app.domain.category.schema import (
     CategoryResponse,
     CategoryUpdateRequest,
 )
+from app.domain.fixed.repository import FixedRepository
 from app.domain.household.model import Household
+from app.domain.transaction.repository import TransactionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +120,14 @@ async def update_category(
     if not category or category.household_id != household.id:
         raise CustomException(ErrorCode.NOT_FOUND)
 
-    if req.kind is not None:
+    if req.kind is not None and req.kind != category.kind:
+        # 월 합계는 거래 타입, 카테고리 차트는 kind 로 집계 — 거래가 붙은 채 kind 를 바꾸면 둘이 어긋난다.
+        # 고정지출도 막는다: 바꾸면 그 고정지출로 거래를 만들 때 kind 불일치로 400 이 난다
+        if (
+            await TransactionRepository(db).has_active_for_category(category.id)
+            or await FixedRepository(db).has_active_for_category(category.id)
+        ):
+            raise CustomException(ErrorCode.CATEGORY_IN_USE)
         category.kind = req.kind
     if req.name is not None:
         category.name = req.name.strip()

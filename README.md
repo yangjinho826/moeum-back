@@ -52,7 +52,7 @@ app/
 ├── core/                   # 공통 인프라
 │   ├── api_response.py     # ApiResponse[T] 응답 래퍼
 │   ├── config.py           # pydantic-settings 설정
-│   ├── database.py         # async engine/session, get_db 의존성
+│   ├── database.py         # async engine/session, DbDepends(get_db, scope=function) 의존성
 │   ├── model.py            # Base, BaseEntity (UUID + 감사 + data_stat_cd)
 │   ├── logging.py          # 콘솔 + 일별 파일 로테이션
 │   ├── auth/               # JWT, 비밀번호 해싱, 인증 의존성 (deps.py 는 user 도메인 추가 시)
@@ -91,6 +91,6 @@ app/
 | 예외 | `CustomException(ErrorCode)` — 핸들러가 `ApiResponse.fail` 변환 |
 | Soft Delete | `data_stat_cd = "99"` (ACTIVE="50") |
 | API prefix | `/v1` (FastAPI `root_path`) |
-| 트랜잭션 | `get_db` 가 자동 commit/rollback. 서비스는 `db.flush()` 만 |
+| 트랜잭션 | `DbDepends`(= `Depends(get_db, scope="function")`)가 응답 **전에** commit/rollback. 서비스는 `db.flush()` 만. 맨 `Depends(get_db)` 금지 — 응답 뒤 commit 으로 돌아감(테스트 W4-3 이 막음) |
 | 서비스 | 모듈 함수 (`service.create_user(db, req)`) — 클래스 X |
 | 레포지토리 | 클래스 (`__init__(self, db)`) |

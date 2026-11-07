@@ -3,11 +3,11 @@ from typing import Annotated
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse
-from app.core.database import get_db
+from app.core.database import DbDepends
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
 from app.domain.fixed import service
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/fixed", tags=["fixed"])
 async def list_fixed_expenses(
     household: CurrentHousehold,
     q: Annotated[FixedListQuery, Query()],
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[CursorPage[FixedResponse]]:
     """고정지출 목록 (cursor 무한 스크롤) — searchTerm/isArchived 필터"""
     response = await service.list_fixed_expenses_cursor(
@@ -44,7 +44,7 @@ async def list_fixed_expenses(
 async def create_fixed_expense(
     req: FixedCreateRequest,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[FixedResponse]:
     """고정지출 생성"""
     response = await service.create_fixed_expense(db, household, req)
@@ -55,7 +55,7 @@ async def create_fixed_expense(
 async def get_fixed_detail(
     fixed_id: UUID,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[FixedResponse]:
     """고정지출 단건 조회"""
     response = await service.get_fixed_detail(db, household, fixed_id)
@@ -67,7 +67,7 @@ async def update_fixed_expense(
     fixed_id: UUID,
     req: FixedUpdateRequest,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[FixedResponse]:
     """고정지출 수정"""
     response = await service.update_fixed_expense(db, household, fixed_id, req)
@@ -78,7 +78,7 @@ async def update_fixed_expense(
 async def delete_fixed_expense(
     fixed_id: UUID,
     household: CurrentHousehold,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[None]:
     """고정지출 삭제 (soft)"""
     await service.delete_fixed_expense(db, household, fixed_id)
@@ -89,7 +89,7 @@ async def delete_fixed_expense(
 async def get_monthly_summary(
     household: CurrentHousehold,
     month: str | None = Query(None, description="YYYY-MM 형식. 생략 시 KST 이번달"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> ApiResponse[FixedMonthlySummaryResponse]:
     """고정지출별 해당 월 누적 사용액"""
     if month:

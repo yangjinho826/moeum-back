@@ -6,6 +6,7 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums.data_status import DataStatus
+from app.core.demo.guard import is_demo_user
 from app.core.exceptions import CustomException, ErrorCode
 from app.core.pagination import CursorPage
 from app.domain.account.model import Account
@@ -128,6 +129,8 @@ async def delete_household(
         raise CustomException(ErrorCode.HOUSEHOLD_NOT_FOUND)
     if household.owner_id != current_user.id:
         raise CustomException(ErrorCode.HOUSEHOLD_NOT_OWNER)
+    if is_demo_user(current_user):  # 지우면 다음 리셋(05:00)까지 체험 화면이 빈다
+        raise CustomException(ErrorCode.DEMO_READ_ONLY)
 
     await _cascade_soft_delete_children(db, household_id)
     household.data_stat_cd = DataStatus.DELETED

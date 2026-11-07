@@ -23,6 +23,20 @@ class FixedRepository:
         )
         return result.scalar_one_or_none()
 
+    async def has_active_for_category(self, category_id: UUID) -> bool:
+        """이 카테고리를 쓰는 활성 고정지출이 있나 — 카테고리 kind 변경 가드용."""
+        result = await self.db.execute(
+            select(FixedExpense.id)
+            .where(
+                and_(
+                    FixedExpense.category_id == category_id,
+                    FixedExpense.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
     async def find_by_ids(self, ids: list[UUID]) -> list[FixedExpense]:
         """거래 응답에 고정지출명을 붙이기 위한 batch 조회 — 상태 필터 없음.
 

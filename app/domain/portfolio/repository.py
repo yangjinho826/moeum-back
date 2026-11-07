@@ -42,6 +42,22 @@ class PortfolioItemRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id_for_update(
+        self, item_id: UUID, *, any_status: bool = False,
+    ) -> PortfolioItem | None:
+        """매매 경로의 직렬화 지점 — SELECT … FOR UPDATE.
+
+        같은 종목 요청은 여기서 줄을 서고, 뒤 요청은 앞 요청이 커밋한 수량·상태를 본다.
+        populate_existing: 세션에 먼저 읽힌 옛 값이 있어도 잠근 시점 값으로 덮는다.
+        autoflush 를 끈 채(no_autoflush) 종목을 고치고 부르면 그 변경이 덮이니, 호출은 첫 쓰기 전에."""
+        stmt = select(PortfolioItem).where(PortfolioItem.id == item_id)
+        if not any_status:
+            stmt = stmt.where(PortfolioItem.data_stat_cd == DataStatus.ACTIVE)
+        result = await self.db.execute(
+            stmt.with_for_update().execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def find_by_id_any_status(self, item_id: UUID) -> PortfolioItem | None:
         """삭제 상태 무관 조회 — 전량매도로 죽은 종목의 거래 수정/삭제 재계산용."""
         result = await self.db.execute(
@@ -200,10 +216,10 @@ class PortfolioItemRepository:
     async def find_active_other_prices(
         self, household_id: UUID | None = None,
     ) -> list[dict]:
-        """OTHER 시장(금 등) 활성 종목의 (code, current_price) — 시세이력 박제용.
+        """OTHER 시장(금 등) 활성 종목의 (item_id, current_price) — 시세이력 박제용.
 
         야후 미지원이라 backfill 불가 → 박제 시점 수동가를 그 달 시세로 남기는 데 쓴다.
-        같은 code 가 여러 종목이면 각각 반환(호출부 upsert 라 마지막이 이김 — 보통 유일).
+        수동가는 가계부·종목마다 달라 code 가 아니라 종목 id 로 돌려준다(code 는 비어 있기도 함).
         household_id 주면 그 가계부만, 없으면 전체(시장 공통 수집).
         """
         conds = [
@@ -214,10 +230,10 @@ class PortfolioItemRepository:
         if household_id is not None:
             conds.append(PortfolioItem.household_id == household_id)
         result = await self.db.execute(
-            select(PortfolioItem.code, PortfolioItem.current_price).where(and_(*conds))
+            select(PortfolioItem.id, PortfolioItem.current_price).where(and_(*conds))
         )
         return [
-            {"code": code, "current_price": price} for code, price in result.all()
+            {"item_id": item_id, "current_price": price} for item_id, price in result.all()
         ]
 
     async def bulk_update_current_price_by_code_market(
@@ -247,6 +263,20 @@ class PortfolioItemRepository:
 class PortfolioTransactionRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    async def has_active_for_account(self, account_id: UUID) -> bool:
+        """이 통장에 활성 매매내역이 있나 — 통장 타입 변경 가드용(전량매도 종목의 이력 포함)."""
+        result = await self.db.execute(
+            select(PortfolioTransaction.id)
+            .where(
+                and_(
+                    PortfolioTransaction.account_id == account_id,
+                    PortfolioTransaction.data_stat_cd == DataStatus.ACTIVE,
+                )
+            )
+            .limit(1)
+        )
+        return result.first() is not None
 
     async def find_by_id(self, tx_id: UUID) -> PortfolioTransaction | None:
         result = await self.db.execute(

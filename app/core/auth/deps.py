@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.enum import TokenType
 from app.core.auth.jwt import decode_token
-from app.core.database import get_db
+from app.core.database import DbDepends
 from app.core.enums.data_status import DataStatus
 from app.core.exceptions import CustomException, ErrorCode
 from app.domain.user.model import User
@@ -19,7 +19,7 @@ bearer_scheme = HTTPBearer()
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = DbDepends,
 ) -> User:
     """Bearer 토큰에서 현재 로그인 유저를 조회"""
     try:

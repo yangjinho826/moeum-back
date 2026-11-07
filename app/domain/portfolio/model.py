@@ -70,6 +70,10 @@ class PortfolioValueHistory(BaseEntity):
         Index("idx_pvh_household", "household_id"),
         Index("idx_pvh_account", "account_id"),
         Index("idx_pvh_item_date", "portfolio_item_id", text("snapshot_date DESC")),
+        Index(
+            "uq_pvh_item_date_active", "portfolio_item_id", "snapshot_date",
+            unique=True, postgresql_where=text("data_stat_cd = '50'"),
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
